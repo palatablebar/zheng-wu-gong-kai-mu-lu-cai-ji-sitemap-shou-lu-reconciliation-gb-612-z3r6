@@ -44,9 +44,14 @@ def reconcile(
         catalog_map.setdefault(canonical, []).append(item)
 
     sitemap_map: dict[str, dict] = {}
+    gap_canonicals: set[str] = set()
     for entry in sitemap_locs:
         canonical = normalize_url(entry.get("canonical_url") or entry.get("loc"))
-        if canonical and canonical not in sitemap_map:
+        if not canonical:
+            continue
+        if entry.get("is_gap"):
+            gap_canonicals.add(canonical)
+        if canonical not in sitemap_map:
             sitemap_map[canonical] = entry
 
     set_a = set(catalog_map)
@@ -55,6 +60,7 @@ def reconcile(
 
     defects: list[dict] = []
     live_sitemap_extras: list[str] = []
+    gap_defects: set[str] = set()
 
     def push(category: str, canonical: str, *, title: str, summary: str, evidence: dict, column_name: str = "", display_url: str | None = None) -> None:
         defects.append(
@@ -104,6 +110,30 @@ def reconcile(
         if status == 200:
             live_sitemap_extras.append(canonical)
             continue
+        if canonical in gap_canonicals:
+            # 子清单拉取失败、地址沿用上一版：不做下线/死链结论，只标缺口待补
+            gap_defects.add(canonical)
+            push(
+                DefectCategory.ONLY_IN_SITEMAP_DEAD.value,
+                canonical,
+                title="sitemap 子清单缺口（沿用上一版，未判定下线）",
+                summary=(
+                    f"来源子清单 {entry.get('source_file') or 'sitemap.xml'} 本轮拉取失败，"
+                    f"该 loc 沿用上一版且探测返回 HTTP {status}；按缺口处理，禁止据此删除地址，"
+                    f"待子清单恢复后重新核对。"
+                ),
+                evidence={
+                    "sitemap_loc": entry.get("loc") or canonical,
+                    "lastmod": entry.get("lastmod"),
+                    "source_file": entry.get("source_file") or "sitemap.xml",
+                    "in_catalog": False,
+                    "http_status": status,
+                    "is_gap": True,
+                    "redirect_chain": probe.get("redirect_chain") or [],
+                    "action": "保留该 loc，排查子清单超时原因，恢复后重跑该站点对账",
+                },
+            )
+            continue
         push(
             DefectCategory.ONLY_IN_SITEMAP_DEAD.value,
             canonical,
@@ -129,13 +159,27 @@ def reconcile(
         probe = probes.get(canonical) or {}
         status = probe.get("status")
         if status != 200:
+            if canonical in gap_canonicals:
+                gap_defects.add(canonical)
             push(
                 DefectCategory.ONLY_IN_SITEMAP_DEAD.value,
                 canonical,
-                title=CATEGORY_TITLES[DefectCategory.ONLY_IN_SITEMAP_DEAD.value],
+                title=(
+                    "sitemap 子清单缺口（沿用上一版，未判定下线）"
+                    if canonical in gap_canonicals
+                    else CATEGORY_TITLES[DefectCategory.ONLY_IN_SITEMAP_DEAD.value]
+                ),
                 summary=(
-                    f"该条目同时出现在目录与 sitemap 中，但探测返回 HTTP {status}；"
-                    f"目录侧要撤下入口、sitemap 侧要删除 loc。"
+                    (
+                        f"来源子清单 {sitemap_map[canonical].get('source_file') or 'sitemap.xml'} 本轮拉取失败，"
+                        f"该 loc 沿用上一版且探测返回 HTTP {status}；按缺口处理，禁止据此删除地址，"
+                        f"待子清单恢复后重新核对。"
+                    )
+                    if canonical in gap_canonicals
+                    else (
+                        f"该条目同时出现在目录与 sitemap 中，但探测返回 HTTP {status}；"
+                        f"目录侧要撤下入口、sitemap 侧要删除 loc。"
+                    )
                 ),
                 evidence={
                     "sitemap_loc": sitemap_map[canonical].get("loc") or canonical,
@@ -143,8 +187,13 @@ def reconcile(
                     "source_file": sitemap_map[canonical].get("source_file") or "sitemap.xml",
                     "in_catalog": True,
                     "http_status": status,
+                    "is_gap": canonical in gap_canonicals,
                     "redirect_chain": probe.get("redirect_chain") or [],
-                    "action": "同时从 sitemap.xml 与栏目页撤下该 URL",
+                    "action": (
+                        "保留该 loc，排查子清单超时原因，恢复后重跑该站点对账"
+                        if canonical in gap_canonicals
+                        else "同时从 sitemap.xml 与栏目页撤下该 URL"
+                    ),
                 },
                 column_name=item.get("column_name") or "",
             )
@@ -207,6 +256,10 @@ def reconcile(
         )
 
     severity_rank = {"p0": 0, "p1": 1, "p2": 2}
+    # 子清单缺口是"数据不完整"而非确认死链：降为 P2，避免误报 P0 触发误删
+    for defect in defects:
+        if defect.get("evidence", {}).get("is_gap"):
+            defect["severity"] = "p2"
     defects.sort(key=lambda item: (severity_rank.get(item["severity"], 9), item["category"], item["url"]))
 
     catalog_total = len(set_a)
@@ -215,7 +268,13 @@ def reconcile(
     coverage = _round(hit / catalog_total) if catalog_total else 0.0
     unreachable = len(set_a - set_c)
     unreachable_rate = _round(unreachable / catalog_total) if catalog_total else 0.0
-    dead_count = sum(1 for defect in defects if defect["category"] == DefectCategory.ONLY_IN_SITEMAP_DEAD.value)
+    dead_count = sum(
+        1
+        for defect in defects
+        if defect["category"] == DefectCategory.ONLY_IN_SITEMAP_DEAD.value
+        and not defect.get("evidence", {}).get("is_gap")
+    )
+    gap_count = len(gap_canonicals)
     sitemap_dead_rate = _round(dead_count / sitemap_total) if sitemap_total else 0.0
 
     stats = {
@@ -229,6 +288,7 @@ def reconcile(
         "unreachable_rate": unreachable_rate,
         "dead": dead_count,
         "sitemap_dead_rate": sitemap_dead_rate,
+        "gap_entries": gap_count,
         "sitemap_extra_live": len(live_sitemap_extras),
         "duplicates": sum(1 for canonical in set_a if len(catalog_map[canonical]) > 1),
         "p0": sum(1 for defect in defects if defect["severity"] == "p0"),

@@ -18,6 +18,7 @@ from src.constants.enums import (
 )
 from src.models.catalog_item import CatalogItem
 from src.models.crawl_run import CrawlRun
+from src.models.crawl_run_sitemap import CrawlRunSitemap
 from src.models.defect import Defect
 from src.models.site import Site
 from src.models.sitemap_entry import SitemapEntry
@@ -52,11 +53,22 @@ def overview(db: Session) -> dict:
     sites_total = db.scalar(select(func.count()).select_from(Site)) or 0
     sites_enabled = db.scalar(select(func.count()).select_from(Site).where(Site.enabled.is_(True))) or 0
     catalog_total = db.scalar(select(func.count()).select_from(CatalogItem)) or 0
-    sitemap_total = db.scalar(select(func.count()).select_from(SitemapEntry)) or 0
     runs_total = db.scalar(select(func.count()).select_from(CrawlRun)) or 0
     defects_total = db.scalar(select(func.count()).select_from(Defect)) or 0
 
     latest = db.scalar(select(CrawlRun).order_by(CrawlRun.id.desc()).limit(1))
+    # sitemap 总量锚定最近一轮巡检的冻结快照，与覆盖率/导出同一口径
+    if latest is not None:
+        sitemap_total = (
+            db.scalar(
+                select(func.count())
+                .select_from(CrawlRunSitemap)
+                .where(CrawlRunSitemap.run_id == latest.id)
+            )
+            or 0
+        )
+    else:
+        sitemap_total = db.scalar(select(func.count()).select_from(SitemapEntry)) or 0
     latest_run = None
     if latest is not None:
         site_name = "全部站点"

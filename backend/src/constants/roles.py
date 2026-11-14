@@ -22,7 +22,7 @@ PERMISSIONS: dict[str, set[str]] = {
     Role.ADMIN.value: {
         "site:read", "site:write",
         "catalog:read", "catalog:write",
-        "sitemap:read",
+        "sitemap:read", "sitemap:sync",
         "crawl:read", "crawl:create",
         "defect:read", "defect:review",
         "export:read", "audit:read", "overview:read",
@@ -30,7 +30,7 @@ PERMISSIONS: dict[str, set[str]] = {
     Role.ANALYST.value: {
         "site:read",
         "catalog:read",
-        "sitemap:read",
+        "sitemap:read", "sitemap:sync",
         "crawl:read", "crawl:create",
         "defect:read", "defect:review",
         "export:read", "overview:read",
@@ -47,6 +47,7 @@ PERMISSIONS: dict[str, set[str]] = {
 
 SITE_WRITE_ROLES = (Role.ADMIN.value,)
 CATALOG_WRITE_ROLES = (Role.ADMIN.value,)
+SITEMAP_SYNC_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 CRAWL_CREATE_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 DEFECT_REVIEW_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 EXPORT_ROLES = (Role.ADMIN.value, Role.ANALYST.value)

@@ -1,11 +1,17 @@
-"""CSV 导出：缺陷清单 / 站点覆盖表 / 覆盖率报表。内容全部来自算法 B 的落库结果。"""
+"""CSV 导出：缺陷清单 / 站点覆盖表 / 覆盖率报表。
+
+口径一致性：所有报表都锚定某一次巡检（默认最近一次），sitemap 侧数字读该轮冻结的
+``CrawlRunSitemap`` 快照，而不是当前生效表——巡检之后清单再同步也不会改写历史导出，
+保证"对账、覆盖率和导出使用同一轮清单口径"。
+"""
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.constants.enums import DEFECT_CATEGORY_LABELS, DEFECT_SEVERITY_LABELS, DEFECT_STATUS_LABELS
 from src.models.crawl_run import CrawlRun
+from src.models.crawl_run_sitemap import CrawlRunSitemap
 from src.models.defect import Defect
 from src.models.site import Site
 from src.utils.csv_export import to_csv
@@ -49,12 +55,13 @@ COVERAGE_HEADERS = [
     "站点编码",
     "站点名称",
     "目录条目 A",
-    "sitemap loc B",
+    "sitemap loc B（快照）",
     "可达 C",
     "A∩B∩C",
     "覆盖率",
     "不可达率",
     "死链数",
+    "缺口沿用数",
     "缺陷数",
     "P0",
     "P1",
@@ -77,6 +84,16 @@ def _evidence_text(defect: Defect) -> str:
     if evidence.get("entry_url"):
         parts.append(f"目录入口={evidence['entry_url']}")
     return "；".join(parts)
+
+
+def _snapshot_sitemap_counts(db: Session, run_id: int) -> dict[int, int]:
+    """某轮巡检冻结的各站点 sitemap loc 数（同一轮清单口径）。"""
+    rows = db.execute(
+        select(CrawlRunSitemap.site_id, func.count())
+        .where(CrawlRunSitemap.run_id == run_id)
+        .group_by(CrawlRunSitemap.site_id)
+    ).all()
+    return {int(site_id): int(count) for site_id, count in rows}
 
 
 def defects_csv(db: Session, run_id: int | None = None) -> bytes:
@@ -112,8 +129,10 @@ def sites_csv(db: Session) -> bytes:
     sites = db.scalars(select(Site).order_by(Site.id)).all()
     latest = db.scalar(select(CrawlRun).order_by(CrawlRun.id.desc()).limit(1))
     metrics = {}
+    snapshot_counts: dict[int, int] = {}
     if latest is not None:
         metrics = {item.get("code"): item for item in (latest.metrics or {}).get("sites", [])}
+        snapshot_counts = _snapshot_sitemap_counts(db, latest.id)
     data = []
     for site in sites:
         stat = metrics.get(site.code, {})
@@ -126,7 +145,7 @@ def sites_csv(db: Session) -> bytes:
                 site.home_url,
                 site.sitemap_url,
                 stat.get("catalog_total", ""),
-                stat.get("sitemap_total", ""),
+                snapshot_counts.get(site.id, stat.get("sitemap_total", "")),
                 stat.get("pages", ""),
                 stat.get("unique", ""),
                 f"{float(stat.get('coverage') or 0):.4f}" if stat else "",
@@ -142,7 +161,8 @@ def coverage_csv(db: Session, run_id: int | None = None) -> bytes:
     if run is None:
         return to_csv(COVERAGE_HEADERS, [])
     data = []
-    for item in (run.metrics or {}).get("sites", []):
+    site_metrics = (run.metrics or {}).get("sites", [])
+    for item in site_metrics:
         catalog_total = int(item.get("catalog_total") or 0)
         hit = int(item.get("hit") or 0)
         data.append(
@@ -157,6 +177,7 @@ def coverage_csv(db: Session, run_id: int | None = None) -> bytes:
                 f"{float(item.get('coverage') or 0):.4f}",
                 f"{float(item.get('unreachable_rate') or 0):.4f}",
                 int(item.get("dead") or 0),
+                int(item.get("gap_entries") or 0),
                 int(item.get("defects") or 0),
                 int(item.get("p0") or 0),
                 int(item.get("p1") or 0),
@@ -170,11 +191,12 @@ def coverage_csv(db: Session, run_id: int | None = None) -> bytes:
             "全部站点",
             int(run.catalog_count or 0),
             int(run.sitemap_count or 0),
-            sum(int(item.get("reachable") or 0) for item in (run.metrics or {}).get("sites", [])),
-            sum(int(item.get("hit") or 0) for item in (run.metrics or {}).get("sites", [])),
+            sum(int(item.get("reachable") or 0) for item in site_metrics),
+            sum(int(item.get("hit") or 0) for item in site_metrics),
             f"{float(run.coverage or 0):.4f}",
             f"{float(run.unreachable_rate or 0):.4f}",
-            sum(int(item.get("dead") or 0) for item in (run.metrics or {}).get("sites", [])),
+            sum(int(item.get("dead") or 0) for item in site_metrics),
+            sum(int(item.get("gap_entries") or 0) for item in site_metrics),
             int(run.defect_count or 0),
             int(run.p0_count or 0),
             int(run.p1_count or 0),

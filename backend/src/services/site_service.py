@@ -6,13 +6,22 @@ from sqlalchemy.orm import Session
 
 from src.constants.demo_data import ORG
 from src.models.catalog_item import CatalogItem
+from src.models.crawl_run import CrawlRun
+from src.models.crawl_run_sitemap import CrawlRunSitemap
 from src.models.site import Site
 from src.models.sitemap_entry import SitemapEntry
 from src.utils.errors import AppError, not_found
 from src.utils.timeutil import iso_utc
 
 
-def serialize(site: Site, *, catalog_count: int | None = None, sitemap_count: int | None = None, coverage: float | None = None) -> dict:
+def serialize(
+    site: Site,
+    *,
+    catalog_count: int | None = None,
+    sitemap_count: int | None = None,
+    gap_count: int | None = None,
+    coverage: float | None = None,
+) -> dict:
     return {
         "id": site.id,
         "code": site.code,
@@ -28,26 +37,54 @@ def serialize(site: Site, *, catalog_count: int | None = None, sitemap_count: in
         "enabled": site.enabled,
         "catalog_count": catalog_count,
         "sitemap_count": sitemap_count,
+        "gap_count": gap_count,
         "coverage": coverage,
         "last_crawled_at": iso_utc(site.last_crawled_at),
         "created_at": iso_utc(site.created_at),
     }
 
 
-def _counts(db: Session, site_ids: list[int]) -> tuple[dict[int, int], dict[int, int]]:
+def _counts(db: Session, site_ids: list[int]) -> tuple[dict[int, int], dict[int, int], dict[int, int]]:
     catalog: dict[int, int] = {}
     sitemap: dict[int, int] = {}
+    gaps: dict[int, int] = {}
     if not site_ids:
-        return catalog, sitemap
+        return catalog, sitemap, gaps
     for site_id, count in db.execute(
         select(CatalogItem.site_id, func.count()).where(CatalogItem.site_id.in_(site_ids)).group_by(CatalogItem.site_id)
     ).all():
         catalog[int(site_id)] = int(count)
+    # sitemap 计数优先取最近一轮巡检快照（与对账/导出同口径），无快照时退回当前生效表
+    latest = db.scalar(select(CrawlRun).order_by(CrawlRun.id.desc()).limit(1))
+    if latest is not None:
+        for site_id, count in db.execute(
+            select(CrawlRunSitemap.site_id, func.count())
+            .where(CrawlRunSitemap.run_id == latest.id, CrawlRunSitemap.site_id.in_(site_ids))
+            .group_by(CrawlRunSitemap.site_id)
+        ).all():
+            sitemap[int(site_id)] = int(count)
+        for site_id, count in db.execute(
+            select(CrawlRunSitemap.site_id, func.count())
+            .where(
+                CrawlRunSitemap.run_id == latest.id,
+                CrawlRunSitemap.site_id.in_(site_ids),
+                CrawlRunSitemap.is_gap.is_(True),
+            )
+            .group_by(CrawlRunSitemap.site_id)
+        ).all():
+            gaps[int(site_id)] = int(count)
     for site_id, count in db.execute(
         select(SitemapEntry.site_id, func.count()).where(SitemapEntry.site_id.in_(site_ids)).group_by(SitemapEntry.site_id)
     ).all():
-        sitemap[int(site_id)] = int(count)
-    return catalog, sitemap
+        sitemap.setdefault(int(site_id), int(count))
+    if not gaps:
+        for site_id, count in db.execute(
+            select(SitemapEntry.site_id, func.count())
+            .where(SitemapEntry.site_id.in_(site_ids), SitemapEntry.is_gap.is_(True))
+            .group_by(SitemapEntry.site_id)
+        ).all():
+            gaps[int(site_id)] = int(count)
+    return catalog, sitemap, gaps
 
 
 def list_sites(
@@ -74,10 +111,15 @@ def list_sites(
         count_stmt = count_stmt.where(Site.enabled == enabled)
     total = db.scalar(count_stmt) or 0
     rows = db.scalars(stmt.order_by(Site.id).limit(limit).offset(offset)).all()
-    catalog_counts, sitemap_counts = _counts(db, [row.id for row in rows])
+    catalog_counts, sitemap_counts, gap_counts = _counts(db, [row.id for row in rows])
     return {
         "items": [
-            serialize(row, catalog_count=catalog_counts.get(row.id, 0), sitemap_count=sitemap_counts.get(row.id, 0))
+            serialize(
+                row,
+                catalog_count=catalog_counts.get(row.id, 0),
+                sitemap_count=sitemap_counts.get(row.id, 0),
+                gap_count=gap_counts.get(row.id, 0),
+            )
             for row in rows
         ],
         "total": total,

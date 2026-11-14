@@ -4,8 +4,10 @@
   users.email
   sites.code
   catalog_items(site_id, entry_url)
-  sitemap_entries(site_id, loc)
+  sitemap_sources(site_id, source_file) + sitemap_versions（不可变版本）
+  sitemap_entries(site_id, canonical_url)（多子清单按 lastmod 裁决后的生效地址）
   crawl_runs.seed_key
+  crawl_run_sitemaps（巡检冻结的 sitemap 口径快照）
   defects(run_id, fingerprint)
   audit_logs.seed_key
 
@@ -23,8 +25,9 @@ from src.models.crawl_run import CrawlRun
 from src.models.defect import Defect
 from src.models.site import Site
 from src.models.sitemap_entry import SitemapEntry
+from src.models.sitemap_round import SitemapRound
 from src.models.user import User
-from src.services import crawl_run_service, fixture_site, site_service
+from src.services import crawl_run_service, fixture_site, site_service, sitemap_sync
 from src.utils.logger import get_logger
 from src.utils.security import hash_password
 
@@ -113,24 +116,25 @@ def ensure_catalog(db, sites: dict[str, Site]) -> int:
 
 
 def ensure_sitemaps(db, sites: dict[str, Site]) -> int:
+    """走子清单同步链路：读 fixture 的 sitemap index → 版本留痕 → lastmod 裁决落库。
+
+    幂等：每轮同步按内容指纹去重，重复执行不会产生重复生效地址。
+    """
     for spec in SITES:
         site = sites.get(spec["code"])
         if site is None:
             continue
-        for row in fixture_site.sitemap_rows(spec):
-            exists = db.scalar(select(SitemapEntry).where(SitemapEntry.site_id == site.id, SitemapEntry.loc == row["loc"]))
-            if exists is None:
-                db.add(
-                    SitemapEntry(
-                        site_id=site.id,
-                        loc=row["loc"],
-                        canonical_url=row["canonical_url"],
-                        lastmod=row["lastmod"],
-                        changefreq=row["changefreq"],
-                        priority=row["priority"],
-                        source_file=row["source_file"],
-                    )
-                )
+        # 已存在轮次说明该站已完成过同步，保持幂等
+        existed = db.scalar(select(SitemapRound).where(SitemapRound.site_id == site.id).limit(1))
+        if existed is not None:
+            continue
+        sitemap_sync.sync_fixture_site(
+            db,
+            site,
+            spec,
+            fail_sources=set(),
+            triggered_by="seed",
+        )
     db.flush()
     return db.scalar(select(func.count()).select_from(SitemapEntry)) or 0
 
@@ -182,8 +186,8 @@ def seed_all() -> dict:
         sites_total = db.scalar(select(func.count()).select_from(Site)) or 0
         logger.info("[SEED_DEMO] sites=%s", sites_total)
         catalog = ensure_catalog(db, sites)
-        sitemap = ensure_sitemaps(db, sites)
         ensure_fixtures()
+        sitemap = ensure_sitemaps(db, sites)
         runs = ensure_run(db)
         ensure_audit(db)
         defects = db.scalar(select(func.count()).select_from(Defect)) or 0

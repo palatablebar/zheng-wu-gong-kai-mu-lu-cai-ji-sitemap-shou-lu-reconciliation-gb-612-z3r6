@@ -21,6 +21,7 @@ def create_run(db: Session, payload: dict, principal: dict, request: Request) ->
         site_id=payload.get("site_id"),
         trigger=payload.get("trigger") or "manual",
         operator_email=principal["email"],
+        incremental=bool(payload.get("incremental")),
     )
     audit_service.record(
         db,

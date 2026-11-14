@@ -151,3 +151,66 @@ def test_deterministic_and_sorted():
     assert first == second
     severities = [item["severity"] for item in first["defects"]]
     assert severities == sorted(severities)
+
+
+def test_gap_entry_is_not_counted_as_p0_dead_link():
+    # 失败子清单沿用的地址即使探测 404，也按缺口（P2）处理，绝不报 P0 死链
+    gap_sitemap = [
+        {
+            "loc": f"{HOME}/gone.html",
+            "canonical_url": f"{HOME}/gone.html",
+            "lastmod": "2026-09-01",
+            "source_file": "sitemap-failed.xml",
+            "is_gap": True,
+        }
+    ]
+    result = run(
+        catalog("/a.html"),
+        gap_sitemap,
+        {f"{HOME}/a.html": probe(), f"{HOME}/gone.html": probe(status=404)},
+    )
+    gap = [item for item in result["defects"] if item["category"] == "only_in_sitemap_dead"]
+    assert len(gap) == 1
+    assert gap[0]["severity"] == "p2"
+    assert gap[0]["evidence"]["is_gap"] is True
+    assert gap[0]["evidence"]["source_file"] == "sitemap-failed.xml"
+    # 缺口不计入 dead，单独计入 gap_entries
+    assert result["stats"]["dead"] == 0
+    assert result["stats"]["gap_entries"] == 1
+    assert result["stats"]["p0"] == 0
+    assert result["stats"]["p2"] == 1
+
+
+def test_normal_dead_link_still_p0_alongside_gap():
+    mixed_sitemap = [
+        {
+            "loc": f"{HOME}/gap.html",
+            "canonical_url": f"{HOME}/gap.html",
+            "lastmod": "2026-09-01",
+            "source_file": "sitemap-failed.xml",
+            "is_gap": True,
+        },
+        {
+            "loc": f"{HOME}/dead.html",
+            "canonical_url": f"{HOME}/dead.html",
+            "lastmod": "2026-09-01",
+            "source_file": "sitemap-ok.xml",
+            "is_gap": False,
+        },
+    ]
+    result = run(
+        catalog("/a.html"),
+        mixed_sitemap,
+        {
+            f"{HOME}/a.html": probe(),
+            f"{HOME}/gap.html": probe(status=404),
+            f"{HOME}/dead.html": probe(status=404),
+        },
+    )
+    dead = [item for item in result["defects"] if item["category"] == "only_in_sitemap_dead"]
+    by_url = {item["canonical_url"]: item for item in dead}
+    assert by_url[f"{HOME}/dead.html"]["severity"] == "p0"
+    assert by_url[f"{HOME}/gap.html"]["severity"] == "p2"
+    assert result["stats"]["dead"] == 1
+    assert result["stats"]["gap_entries"] == 1
+    assert result["stats"]["p0"] == 1

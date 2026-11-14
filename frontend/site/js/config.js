@@ -21,9 +21,10 @@ export const BRAND = {
 export const NAV = [
   { to: '#/overview', no: '01', label: '总览', permission: 'overview:read' },
   { to: '#/sites', no: '02', label: '站点与栏目', permission: 'site:read' },
-  { to: '#/crawl-runs', no: '03', label: '抓取运行', permission: 'crawl:read' },
-  { to: '#/defects', no: '04', label: '对账缺陷', permission: 'defect:read' },
-  { to: '#/reports', no: '05', label: '报表与导出', permission: 'defect:read' },
+  { to: '#/sitemaps', no: '03', label: '清单同步', permission: 'sitemap:read' },
+  { to: '#/crawl-runs', no: '04', label: '抓取运行', permission: 'crawl:read' },
+  { to: '#/defects', no: '05', label: '对账缺陷', permission: 'defect:read' },
+  { to: '#/reports', no: '06', label: '报表与导出', permission: 'defect:read' },
 ];
 
 export const ROLE_LABELS = {
@@ -40,11 +41,11 @@ export const ROLE_DUTIES = {
 
 export const PERMISSIONS = {
   admin: [
-    'overview:read', 'site:read', 'site:write', 'catalog:read', 'catalog:write', 'sitemap:read',
+    'overview:read', 'site:read', 'site:write', 'catalog:read', 'catalog:write', 'sitemap:read', 'sitemap:sync',
     'crawl:read', 'crawl:create', 'defect:read', 'defect:review', 'export:read', 'audit:read',
   ],
   analyst: [
-    'overview:read', 'site:read', 'catalog:read', 'sitemap:read',
+    'overview:read', 'site:read', 'catalog:read', 'sitemap:read', 'sitemap:sync',
     'crawl:read', 'crawl:create', 'defect:read', 'defect:review', 'export:read',
   ],
   viewer: ['overview:read', 'site:read', 'catalog:read', 'sitemap:read', 'crawl:read', 'defect:read'],
@@ -85,6 +86,16 @@ export const ENUMS = {
     rel_next: 'rel=next',
     index_guess: '页码猜解',
     sitemap_probe: 'sitemap 探测',
+  },
+  sourceStatus: {
+    ok: '正常',
+    failed: '拉取失败',
+    stale_gap: '缺口沿用',
+  },
+  roundStatus: {
+    success: '完整',
+    partial: '部分缺口',
+    failed: '失败',
   },
 };
 

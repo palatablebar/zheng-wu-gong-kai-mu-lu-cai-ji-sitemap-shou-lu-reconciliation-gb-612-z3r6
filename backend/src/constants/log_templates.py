@@ -8,6 +8,7 @@ ACTIONS: dict[str, str] = {
     "catalog.create": "登记目录条目",
     "crawl.create": "发起巡检",
     "crawl.complete": "巡检完成",
+    "sitemap.sync": "同步 sitemap 子清单",
     "defect.review": "处理缺陷单",
     "export.defects": "导出缺陷清单",
     "export.sites": "导出站点覆盖表",

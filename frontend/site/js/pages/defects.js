@@ -16,6 +16,7 @@ function evidenceBlock(item) {
   if (evidence.sitemap_loc) lines.push(`sitemap loc：${evidence.sitemap_loc}\nlastmod：${evidence.lastmod || '—'}\n来源文件：${evidence.source_file || 'sitemap.xml'}`);
   if (evidence.entry_url) lines.push(`目录入口：${evidence.entry_url}\n栏目：${evidence.column || '—'}（第 ${evidence.page_no || 1} 页）`);
   if (evidence.http_status !== undefined && evidence.http_status !== null) lines.push(`探测状态：HTTP ${evidence.http_status}`);
+  if (evidence.is_gap) lines.push('⚠ 子清单缺口：该地址沿用上一版，未判定下线，禁止据此删除');
   if (evidence.entry_urls) lines.push(`重复入口（${evidence.entry_urls.length} 条）：\n  ${evidence.entry_urls.join('\n  ')}`);
   if (evidence.action) lines.push(`\n整改建议：${evidence.action}`);
   return `<pre class="code">${esc(lines.join('\n') || JSON.stringify(evidence, null, 2))}</pre>`;

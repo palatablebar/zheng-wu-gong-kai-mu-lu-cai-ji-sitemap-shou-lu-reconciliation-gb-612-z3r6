@@ -131,6 +131,50 @@ def sitemap_rows(spec: dict) -> list[dict]:
     return rows
 
 
+def sitemap_parts(spec: dict) -> list[dict]:
+    """把该站 sitemap 拆成多份子清单（模拟政务站 sitemap index 结构）。
+
+    按栏目拆，每份子清单文件名 ``sitemap-<column>.xml``；死链集中到
+    ``sitemap-archived.xml``。返回 [{"source_file", "rows"}]，顺序稳定。
+    """
+    by_column: dict[str, list[dict]] = {}
+    archived: list[dict] = []
+    live_paths = {item_path(code, no) for code, _name, _size in COLUMNS for no in range(1, column_size(code) + 1)}
+    for row in sitemap_rows(spec):
+        path = "/" + row["loc"].split("/", 3)[-1]
+        if path not in live_paths:
+            archived.append(row)
+            continue
+        column = path.split("/")[2]
+        by_column.setdefault(column, []).append(row)
+    parts = [
+        {"source_file": f"sitemap-{code}.xml", "rows": by_column.get(code, [])}
+        for code, _name, _size in COLUMNS
+    ]
+    if archived:
+        parts.append({"source_file": "sitemap-archived.xml", "rows": archived})
+    return parts
+
+
+def sitemap_index_xml(parts: list[dict], spec: dict) -> str:
+    home = spec["home_url"].rstrip("/")
+    body = []
+    for part in parts:
+        lastmod = max((row.get("lastmod") or "") for row in part["rows"]) if part["rows"] else ""
+        body.append(
+            "  <sitemap>\n"
+            f"    <loc>{home}/{part['source_file']}</loc>\n"
+            f"    <lastmod>{lastmod}</lastmod>\n"
+            "  </sitemap>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(body)
+        + "\n</sitemapindex>\n"
+    )
+
+
 def sitemap_xml(rows: list[dict]) -> str:
     body = []
     for row in rows:
@@ -174,7 +218,7 @@ def _listing_html(spec: dict, column_code: str, page_no: int) -> str:
     nav = [f'  <a href="{home}/index.html">首页</a>', f'  <a href="{home}/xxgk/{column_code}/index.html">{column_name}</a>']
     pager = []
     if page_no > 1:
-        pager.append(f'  <a class="pager" href="index.html">上一页</a>')
+        pager.append('  <a class="pager" href="index.html">上一页</a>')
     if page_no < total_pages:
         pager.append(f'  <a class="pager" href="index_{page_no + 1}.html">下一页</a>')
 
@@ -289,8 +333,13 @@ def build_site(spec: dict, root: Path) -> dict:
             written += 1
 
     rows = sitemap_rows(spec)
-    _write(root, "/sitemap.xml", sitemap_xml(rows))
+    parts = sitemap_parts(spec)
+    # 兼容入口：sitemap.xml 写成 sitemap index，指向各份子清单
+    _write(root, "/sitemap.xml", sitemap_index_xml(parts, spec))
     written += 1
+    for part in parts:
+        _write(root, f"/{part['source_file']}", sitemap_xml(part["rows"]))
+        written += 1
 
     status_map: dict[str, int] = {}
     for dead_path in spec.get("dead", []):

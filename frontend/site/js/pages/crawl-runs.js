@@ -7,13 +7,15 @@ const state = { siteId: '', status: '' };
 function sitesTable(sites) {
   if (!sites || sites.length === 0) return '<p class="muted">本次巡检没有站点明细。</p>';
   return `<div class="table-wrap"><table class="data" style="min-width:0">
-    <thead><tr><th>站点</th><th>分页</th><th>链接/去重</th><th>覆盖率</th><th>缺陷</th><th>P0</th></tr></thead>
+    <thead><tr><th>站点</th><th>口径</th><th>分页</th><th>链接/去重</th><th>覆盖率</th><th>缺口</th><th>缺陷</th><th>P0</th></tr></thead>
     <tbody>${sites
       .map(
         (site) => `<tr><td>${esc(site.name)}<div class="mono muted">${esc(site.code)}</div></td>
+          <td>${site.recomputed === false ? '<span class="badge info">沿用上一轮</span>' : '<span class="badge ok">本轮重算</span>'}</td>
           <td class="num">${esc(site.pages)}</td>
           <td class="num">${esc(site.links)} / ${esc(site.unique)}</td>
           <td class="num">${esc(fmtPct(site.coverage))}</td>
+          <td class="num">${esc(fmtNum(site.gap_entries || 0))}</td>
           <td class="num">${esc(site.defects)}</td>
           <td class="num">${esc(site.p0)}</td></tr>`,
       )
@@ -32,6 +34,7 @@ function openRun(view, ctx, run) {
       ['canonical 去重', `<span class="mono">${esc(fmtNum(run.unique_links))}（重复率 ${esc(fmtPct(run.dup_ratio))}）</span>`],
       ['目录 / sitemap', `<span class="mono">${esc(run.catalog_count)} / ${esc(run.sitemap_count)}</span>`],
       ['覆盖率 / 不可达率', `<span class="mono">${esc(fmtPct(run.coverage))} / ${esc(fmtPct(run.unreachable_rate))}</span>`],
+      ['清单口径', `<span class="mono">冻结轮次 ${esc(Object.keys(run.sitemap_round_ids || {}).length)} 个站点 · 增量重算 ${esc((run.affected_sites || []).length)} 个</span>`],
       ['缺陷', `${esc(run.defect_count)} 条（P0 ${esc(run.p0_count)} / P1 ${esc(run.p1_count)} / P2 ${esc(run.p2_count)}）`],
       ['开始', fmtTime(run.started_at)],
       ['结束', fmtTime(run.finished_at)],
@@ -61,8 +64,12 @@ function openRunForm(view, ctx, sites) {
         options: [{ value: '', label: '全部启用站点' }, ...sites.map((site) => ({ value: site.id, label: `${site.name}（${site.code}）` }))],
       })}
       ${field({ label: '触发方式', name: 'trigger', value: 'manual', options: triggerOptions })}
+      <div class="field" style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="incremental" name="incremental" style="width:auto" />
+        <label for="incremental" style="margin:0">增量巡检：只重算子清单发生变化的站点，其余沿用上一轮指标</label>
+      </div>
       <div class="mono muted">算法 A：rel=next 优先，缺失时按 index_2.html 猜解；去 utm_*/sessionid/#fragment，统一 https 与尾斜杠，跟随 301。<br />
-      算法 B：A（目录）/ B（sitemap）/ C（可达）三向对账，死链 P0、漏收 P1、链路与口径 P2。</div>
+      算法 B：A（目录）/ B（sitemap 快照）/ C（可达）三向对账，死链 P0、漏收 P1、链路与口径 P2；失败子清单沿用地址按缺口处理，不误判下线。</div>
       <div class="form-error" id="run-error"></div>
       <button class="btn accent" type="submit">开始巡检</button>
     </form>`,
@@ -77,6 +84,7 @@ function openRunForm(view, ctx, sites) {
       const run = await api.post('/api/crawl-runs', {
         site_id: form.site_id.value ? Number(form.site_id.value) : null,
         trigger: form.trigger.value,
+        incremental: form.incremental.checked,
       });
       toast(`巡检 ${run.run_no} 完成：覆盖率 ${fmtPct(run.coverage)}，缺陷 ${run.defect_count} 条`);
       close();

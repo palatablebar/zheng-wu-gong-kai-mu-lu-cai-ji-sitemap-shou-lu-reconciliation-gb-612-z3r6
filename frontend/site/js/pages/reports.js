@@ -18,15 +18,16 @@ const state = { tab: 'coverage' };
 function coverageTable(sites) {
   return `<div class="table-wrap"><table class="data" style="min-width:0">
     <thead><tr>
-      <th>站点</th><th>目录 A</th><th>sitemap B</th><th>可达 C</th><th>A∩B∩C</th>
+      <th>站点</th><th>目录 A</th><th>sitemap B（快照）</th><th>缺口</th><th>可达 C</th><th>A∩B∩C</th>
       <th>覆盖率</th><th>不可达率</th><th>死链</th><th>缺陷</th><th>P0/P1/P2</th>
     </tr></thead>
     <tbody>${sites
       .map(
         (site) => `<tr data-id="${esc(site.code)}">
-          <td>${esc(site.name)}<div class="mono muted">${esc(site.code)}</div></td>
+          <td>${esc(site.name)}<div class="mono muted">${esc(site.code)}</div>${site.recomputed === false ? '<span class="badge info">沿用上一轮</span>' : ''}</td>
           <td class="num">${esc(fmtNum(site.catalog_total))}</td>
           <td class="num">${esc(fmtNum(site.sitemap_total))}</td>
+          <td class="num">${site.gap_entries ? `<span class="badge warn">${esc(fmtNum(site.gap_entries))}</span>` : '0'}</td>
           <td class="num">${esc(fmtNum(site.reachable))}</td>
           <td class="num">${esc(fmtNum(site.hit))}</td>
           <td class="num">${esc(fmtPct(site.coverage))}</td>
@@ -120,7 +121,7 @@ export const reportsPage = {
             <button data-tab="coverage" class="${state.tab === 'coverage' ? 'active' : ''}">覆盖率报表</button>
             ${isAdmin ? `<button data-tab="audit" class="${state.tab === 'audit' ? 'active' : ''}">审计日志</button>` : ''}
           </div>
-          <p class="mono muted" style="margin:0 0 10px">导出内容来自算法 B 的落库结果，行数与页面一致；缺陷 CSV 一行一条缺陷单。</p>
+          <p class="mono muted" style="margin:0 0 10px">报表锚定一次巡检：sitemap B 读该轮冻结快照，与对账/导出同一口径；缺陷 CSV 一行一条缺陷单。</p>
         </div>
       </section>
       ${body}`;

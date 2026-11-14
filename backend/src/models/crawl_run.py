@@ -38,5 +38,9 @@ class CrawlRun(Base):
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     log_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     seed_key: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
+    # 本轮巡检冻结的 sitemap 轮次（site_id -> SitemapRound.id），保证对账/覆盖率/导出同一口径
+    sitemap_round_ids: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 增量巡检时实际重算的站点 code 列表；None/空表示全站全量
+    affected_sites: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

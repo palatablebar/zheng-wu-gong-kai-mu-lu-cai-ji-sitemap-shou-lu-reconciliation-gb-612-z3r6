@@ -10,6 +10,7 @@
   1. 栏目页有链接但 sitemap 没收录 → 搜索引擎抓不到（漏收）；
   2. 详情页已下线，sitemap 仍指向 404 → 搜索引擎持续抓死链（P0）；
   3. 分页只抓第一页，`rel=next` 缺失时整页漏抓；同一 URL 带 `utm_*` / `#fragment` 被重复计数，重复率报不准。
+- **多子清单的季度核对风险（本期治理）**：政务站把 sitemap 拆成多份子清单后，后到的旧文件会覆盖已生效地址、子清单超时会让剩余地址被当成全部下线。系统按 **lastmod 裁决同一地址版本、失败源沿用上一版并标缺口、巡检冻结快照统一口径** 处理。
 - **上下游**：三个政务站（栏目页 / sitemap.xml / 详情页）→ 本系统（分页抓取 → URL 规范化 → 三向对账 → 缺陷单）→ 编辑部整改 + 季度考核报表。
 - **一天的工作剧本**：
   1. 08:50 主管 `admin` 登录，总览看到上季度覆盖率 96.67%、P0 死链 14 条；
@@ -37,11 +38,12 @@
 | # | 模块名 | 对应页面 | 对应 services + controller | 主要 API |
 |---|---|---|---|---|
 | ① | 站点与栏目登记 | `#/sites` 站点与栏目 | `site_service` + `catalog_service` + `sitemap_service` / `site_controller` `catalog_controller` | `GET/POST /api/sites`、`PATCH /api/sites/{id}`、`GET/POST /api/catalog`、`GET /api/sitemaps` |
-| ② | 分页抓取调度 | `#/crawl-runs` 抓取运行 | `crawl_run_service` + `crawl_engine` / `crawl_run_controller` | `GET/POST /api/crawl-runs`、`GET /api/crawl-runs/{id}` |
-| ③ | URL 规范化与采集（算法 A） | `#/sites`（口径核对）+ `#/crawl-runs`（统计） | `services/url_normalize.py` + `services/crawl_engine.py` / `catalog_controller.preview_normalize` | `GET /api/catalog/normalize?url=` |
-| ④ | 三向对账（算法 B） | `#/crawl-runs` → `#/defects` | `services/reconcile_engine.py` / `crawl_run_service.execute_run` | `POST /api/crawl-runs` 内触发；`GET /api/defects?run_id=` |
-| ⑤ | 缺陷单与整改 | `#/defects` 对账缺陷 | `defect_service` / `defect_controller` | `GET /api/defects`、`GET /api/defects/{id}`、`PATCH /api/defects/{id}/review`、`GET /api/defects/facets` |
-| ⑥ | 覆盖率报表与导出 | `#/reports` 报表与导出（含审计页签） | `export_service` + `overview_service` + `audit_service` / `export_controller` | `GET /api/exports/{defects,sites,coverage}.csv`、`GET /api/overview`、`GET /api/audit` |
+| ② | sitemap 子清单版本化 | `#/sitemaps` 清单同步 | `sitemap_parser` + `sitemap_resolve` + `sitemap_sync` / `sitemap_controller` | `POST /api/sitemaps/sync`、`POST /api/sitemaps/sync-fixture`、`GET /api/sitemaps/sources`、`GET /api/sitemaps/rounds` |
+| ③ | 分页抓取调度 | `#/crawl-runs` 抓取运行 | `crawl_run_service` + `crawl_engine` / `crawl_run_controller` | `GET/POST /api/crawl-runs`、`GET /api/crawl-runs/{id}` |
+| ④ | URL 规范化与采集（算法 A） | `#/sites`（口径核对）+ `#/crawl-runs`（统计） | `services/url_normalize.py` + `services/crawl_engine.py` / `catalog_controller.preview_normalize` | `GET /api/catalog/normalize?url=` |
+| ⑤ | 三向对账（算法 B） | `#/crawl-runs` → `#/defects` | `services/reconcile_engine.py` / `crawl_run_service.execute_run` | `POST /api/crawl-runs` 内触发；`GET /api/defects?run_id=` |
+| ⑥ | 缺陷单与整改 | `#/defects` 对账缺陷 | `defect_service` / `defect_controller` | `GET /api/defects`、`GET /api/defects/{id}`、`PATCH /api/defects/{id}/review`、`GET /api/defects/facets` |
+| ⑦ | 覆盖率报表与导出 | `#/reports` 报表与导出（含审计页签） | `export_service` + `overview_service` + `audit_service` / `export_controller` | `GET /api/exports/{defects,sites,coverage}.csv`、`GET /api/overview`、`GET /api/audit` |
 
 > 登录（`/api/auth/*`）与审计（`/api/audit`）按约定只算横切能力，不占业务模块配额。
 
@@ -97,10 +99,11 @@ backend/
   src/{config,constants,controllers,middlewares,models,routes,schemas,services,utils}
   scripts/{seed_demo.py,demo_config.py,worker_healthcheck.sh}
   migrations/
-  tests/{test_url_normalize.py,test_crawl_engine.py,test_reconcile_engine.py,test_acceptance.py,test_security.py}
+  tests/{test_url_normalize.py,test_crawl_engine.py,test_reconcile_engine.py,test_acceptance.py,
+         test_sitemap_parser.py,test_sitemap_resolve.py,test_sitemap_sync.py,test_sitemap_api.py,test_security.py}
 frontend/
   site/{index.html,css/{tokens,app}.css,js/{config,api,store,ui,app}.js,js/pages/*.js}
-sample_site/<site_code>/         ← seed 运行时在容器内生成（不进仓库）
+sample_site/<site_code>/         ← seed 运行时在容器内生成（sitemap.xml 索引 + sitemap-*.xml 子清单，不进仓库）
 ```
 
 ## 9. 环境变量
@@ -133,6 +136,17 @@ sample_site/<site_code>/         ← seed 运行时在容器内生成（不进�
 - **指标**：覆盖率 `coverage = |A∩B∩C| / |A|`；不可达率 `unreachable_rate = |A\\C| / |A|`；死链率 `sitemap_dead_rate = dead / |B|`。
 - **本批实测**：`A=360`、`B=362`、`A∩B∩C=348` → 覆盖率 `348/360 = 96.67%`；缺陷 31 条（P0 14 / P1 12 / P2 5）。
 
+### 算法 C｜多子清单版本化裁决（`services/sitemap_parser.py` + `sitemap_resolve.py` + `sitemap_sync.py`）
+
+政务站把 sitemap 拆成 sitemap index + 多份子清单后，季度核对的两类误判由本算法治理：
+
+- **数据模型**：`sitemap_sources`（子清单登记）→ `sitemap_versions`（每次到达的不可变版本，成功存内容指纹与条目、失败存错误）→ `sitemap_rounds`（一轮多子清单拉取的裁决留痕）→ `sitemap_entries`（按站点裁决后的当前生效地址，带 `source_file`/`lastmod`/`is_gap`）。
+- **lastmod 裁决（迟到清单不覆盖）**：同一 canonical URL 在多份子清单出现时，`lastmod` 更晚者胜；相等时来源顺序靠前的胜（确定性）。迟到清单带来的旧 `lastmod` 记录只能 `kept`，不能覆盖已生效地址。
+- **失败沿用 + 缺口标记（不误删）**：子清单超时/解析失败时不写成功指纹、不参与删除语义；其地址沿用上一版并置 `is_gap=true`，来源标 `stale_gap`，轮次标 `partial`。算法 B 对缺口地址即使探测 404 也只报 **P2 缺口**（`evidence.is_gap=true`），不计 P0 死链，禁止据此删地址；子清单恢复后下一轮自动清除缺口。
+- **单文件变化只重算受影响站点**：每轮记录各子清单内容指纹（含"失败即指纹消失"），增量巡检（`POST /api/crawl-runs` 带 `incremental=true`）用 `diff_source_hashes` 对比上一轮巡检快照，只重算指纹变化的站点，未变化站点沿用上一轮指标（明细里 `recomputed=false`）。
+- **同一轮清单口径**：巡检发起时把生效地址冻结到 `crawl_run_sitemaps` 快照；之后算法 B 对账、覆盖率统计、`overview` 站点计数、三个 CSV 导出全部读该快照，巡检后清单再变化也不改写历史结论。
+- **纯函数核心**：`sitemap_resolve.resolve_round()` 不碰数据库与网络，裁决口径由 `tests/test_sitemap_resolve.py` 固化；落库事务在 `sitemap_sync.apply_round()`。
+
 ## 11. seed 数量口径
 
 | 项 | 数量 | 说明 |
@@ -141,8 +155,9 @@ sample_site/<site_code>/         ← seed 运行时在容器内生成（不进�
 | 站点（`SEED_SUMMARY sources=`） | 3 | `zwgk-hezhou` / `zwfw-hezhou` / `quxian-hezhou` |
 | 目录条目（A） | 360 | 每站 6 栏 × 120 条 |
 | 分页清单页 | 36 | 每站 12 页（page_size=12） |
-| sitemap loc（B） | 362 | 360 − 12 条漏收 + 14 条死链 |
-| 巡检（`runs=`） | 1 | `seed-crawl-2026q4`，触发方式 `seed` |
+| sitemap 子清单 | 21 | 每站 7 份（6 栏目分片 + 1 archived），sitemap.xml 为索引 |
+| sitemap loc（B） | 362 | 360 − 12 条漏收 + 14 条死链；按 lastmod 裁决后的生效地址 |
+| 巡检（`runs=`） | 1 | `seed-crawl-2026q4`，触发方式 `seed`，冻结 362 条快照 |
 | 缺陷单（`findings=`） | 31 | P0 14 / P1 12 / P2 5 |
 | 待整改（`pending=`） | 31 | seed 不覆盖人工整改状态 |
 
@@ -157,6 +172,7 @@ sample_site/<site_code>/         ← seed 运行时在容器内生成（不进�
 | 巡检状态 `queued/running/success/partial/failed` | `backend/src/constants/enums.py::CrawlStatus` | `ENUMS.crawlStatus` |
 | 触发方式 `manual/schedule/seed` | `backend/src/constants/enums.py::TriggerKind` | `ENUMS.trigger` |
 | 分页发现方式 `home_link/rel_next/index_guess/sitemap_probe` | `backend/src/constants/enums.py::DiscoverySource` | `ENUMS.discovery` |
+| 子清单状态 `ok/failed/stale_gap`、轮次状态 `success/partial/failed` | `backend/src/services/sitemap_resolve.py` 常量 | `ENUMS.sourceStatus` / `ENUMS.roundStatus` |
 
 ## 13. 视觉方向
 

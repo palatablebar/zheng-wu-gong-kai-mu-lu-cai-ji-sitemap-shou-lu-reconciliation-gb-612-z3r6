@@ -56,10 +56,68 @@ CREATE TABLE sitemap_entries (
     changefreq      VARCHAR(20),
     priority        DOUBLE NOT NULL DEFAULT 0.8,
     source_file     VARCHAR(120),
+    is_gap          TINYINT(1) NOT NULL DEFAULT 0,
     created_at      DATETIME NOT NULL,
-    CONSTRAINT uq_sitemap_site_loc UNIQUE (site_id, loc),
+    updated_at      DATETIME NOT NULL,
+    CONSTRAINT uq_sitemap_site_canonical UNIQUE (site_id, canonical_url),
     CONSTRAINT fk_sitemap_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
-    INDEX ix_sitemap_canonical (canonical_url)
+    INDEX ix_sitemap_canonical (canonical_url),
+    INDEX ix_sitemap_source (site_id, source_file),
+    INDEX ix_sitemap_gap (is_gap)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 子清单登记：一个站点的一份 sitemap 分片
+CREATE TABLE sitemap_sources (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    site_id             INT NOT NULL,
+    source_file         VARCHAR(200) NOT NULL,
+    source_url          VARCHAR(300),
+    status              VARCHAR(20) NOT NULL DEFAULT 'ok',
+    last_error          TEXT,
+    last_success_hash   VARCHAR(64),
+    last_success_at     DATETIME,
+    last_attempt_at     DATETIME,
+    created_at          DATETIME NOT NULL,
+    updated_at          DATETIME NOT NULL,
+    CONSTRAINT uq_source_site_file UNIQUE (site_id, source_file),
+    CONSTRAINT fk_source_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 子清单版本：每次到达（成功/失败）一条不可变留痕
+CREATE TABLE sitemap_versions (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    source_id       INT NOT NULL,
+    site_id         INT NOT NULL,
+    round_id        INT NULL,
+    status          VARCHAR(20) NOT NULL,
+    content_hash    VARCHAR(64),
+    entry_count     INT NOT NULL DEFAULT 0,
+    payload         JSON,
+    error           TEXT,
+    created_at      DATETIME NOT NULL,
+    CONSTRAINT fk_version_source FOREIGN KEY (source_id) REFERENCES sitemap_sources(id) ON DELETE CASCADE,
+    CONSTRAINT fk_version_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+    INDEX ix_version_source (source_id),
+    INDEX ix_version_round (round_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 同步轮次：一次多子清单拉取 + lastmod 裁决的留痕
+CREATE TABLE sitemap_rounds (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    site_id         INT NOT NULL,
+    round_no        VARCHAR(40) NOT NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'success',
+    source_total    INT NOT NULL DEFAULT 0,
+    source_failed   INT NOT NULL DEFAULT 0,
+    entry_total     INT NOT NULL DEFAULT 0,
+    gap_count       INT NOT NULL DEFAULT 0,
+    source_hashes   JSON,
+    stats           JSON,
+    note            TEXT,
+    triggered_by    VARCHAR(160) NOT NULL DEFAULT 'system',
+    created_at      DATETIME NOT NULL,
+    CONSTRAINT fk_round_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+    INDEX ix_round_site (site_id, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE crawl_runs (
@@ -85,9 +143,30 @@ CREATE TABLE crawl_runs (
     metrics         JSON,
     log_text        TEXT,
     seed_key        VARCHAR(120) UNIQUE,
+    sitemap_round_ids JSON,
+    affected_sites  JSON,
     started_at      DATETIME NOT NULL,
     finished_at     DATETIME,
     CONSTRAINT fk_run_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 巡检轮次冻结的 sitemap 口径快照：对账/覆盖率/导出都读它
+CREATE TABLE crawl_run_sitemaps (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    run_id          INT NOT NULL,
+    site_id         INT NOT NULL,
+    loc             VARCHAR(300) NOT NULL,
+    canonical_url   VARCHAR(300) NOT NULL,
+    lastmod         VARCHAR(20),
+    changefreq      VARCHAR(20),
+    priority        DOUBLE NOT NULL DEFAULT 0.8,
+    source_file     VARCHAR(120) NOT NULL DEFAULT 'sitemap.xml',
+    is_gap          TINYINT(1) NOT NULL DEFAULT 0,
+    CONSTRAINT uq_run_sitemap_canonical UNIQUE (run_id, canonical_url),
+    CONSTRAINT fk_runsnap_run FOREIGN KEY (run_id) REFERENCES crawl_runs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_runsnap_site FOREIGN KEY (site_id) REFERENCES sites(id) ON DELETE CASCADE,
+    INDEX ix_runsnap_run (run_id),
+    INDEX ix_runsnap_site (site_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE defects (
