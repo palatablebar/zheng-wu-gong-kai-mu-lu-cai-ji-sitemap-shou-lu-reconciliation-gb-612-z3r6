@@ -1,0 +1,57 @@
+/* 设计令牌：档案馆索引卡 —— 靛蓝 + 卡片米 + 钢笔墨。
+   oklch 色板；禁用纯黑纯白（墨色 L≈0.27，纸色 L≈0.95）；双字体 display/body + 打字机等宽。 */
+:root {
+  /* 纸与卡 */
+  --paper: oklch(0.951 0.019 88);
+  --paper-2: oklch(0.921 0.024 86);
+  --paper-3: oklch(0.884 0.028 84);
+  --card: oklch(0.976 0.011 92);
+  --card-edge: oklch(0.9 0.022 86);
+
+  /* 钢笔墨 */
+  --ink: oklch(0.268 0.044 264);
+  --ink-soft: oklch(0.442 0.036 264);
+  --ink-faint: oklch(0.604 0.028 264);
+
+  /* 描线 */
+  --rule: oklch(0.816 0.022 86);
+  --rule-strong: oklch(0.696 0.03 82);
+  --rule-ink: oklch(0.44 0.04 264);
+
+  /* 靛蓝主色 */
+  --accent: oklch(0.443 0.132 268);
+  --accent-soft: oklch(0.558 0.104 266);
+  --accent-wash: oklch(0.913 0.036 268);
+  --accent-deep: oklch(0.352 0.114 270);
+
+  /* 语义色 */
+  --ok: oklch(0.512 0.082 156);
+  --ok-wash: oklch(0.929 0.033 156);
+  --warn: oklch(0.686 0.118 72);
+  --warn-wash: oklch(0.941 0.038 78);
+  --danger: oklch(0.503 0.152 24);
+  --danger-wash: oklch(0.933 0.038 26);
+  --info: oklch(0.512 0.062 240);
+  --info-wash: oklch(0.933 0.024 240);
+
+  /* 双字体：档案正题（Cormorant Garamond / 宋体）+ 正文（思源黑）+ 索引卡打字机 */
+  --font-display: 'Cormorant Garamond', 'Songti SC', 'STSong', serif;
+  --font-body: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  --font-mono: 'Courier Prime', 'SFMono-Regular', ui-monospace, monospace;
+
+  --fs-xs: 0.72rem;
+  --fs-sm: 0.82rem;
+  --fs-md: 0.94rem;
+  --fs-lg: 1.18rem;
+  --fs-xl: clamp(1.45rem, 2.1vw, 2.1rem);
+  --fs-2xl: clamp(1.95rem, 3.3vw, 3.05rem);
+
+  --pad: clamp(14px, 1.6vw, 28px);
+  --rail: 228px;
+  --radius: 2px;
+  --radius-card: 3px;
+  --shadow: 0 1px 0 oklch(0.86 0.016 84), 0 18px 42px -36px oklch(0.33 0.05 264 / 0.6);
+  --shadow-card: 0 1px 2px oklch(0.55 0.03 84 / 0.16), 0 10px 22px -20px oklch(0.33 0.05 264 / 0.5);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --rule-line: 1px solid var(--rule);
+}

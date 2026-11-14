@@ -1,0 +1,10 @@
+"""限额常量。"""
+
+RATE_WINDOW_SECONDS = 60
+MAX_PAGE_SIZE = 200
+MAX_IMPORT_ROWS = 5000
+MAX_EXPORT_ROWS = 20000
+
+# 算法 A 抓取上限（防止 fixture 异常时无限翻页）
+MAX_CRAWL_PAGES = 80
+MAX_CRAWL_DEPTH = 4

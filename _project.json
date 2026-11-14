@@ -1,0 +1,10 @@
+{
+  "id": "gb-612",
+  "org": "河州市政务公开办 · 网站编辑部",
+  "short": "sitemapwatch",
+  "title": "政务公开目录采集与 sitemap 收录对账",
+  "db": "mysql",
+  "fe": 18201,
+  "be": 19201,
+  "dbp": 17701
+}
